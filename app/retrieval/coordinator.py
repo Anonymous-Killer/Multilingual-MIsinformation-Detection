@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
 from typing import Optional
 
@@ -8,6 +9,25 @@ from app.adapters.web_search import TavilySearchAdapter
 from app.models.schemas import QueryRefinement, RetrievedSource, RetrievalPlan
 from app.vectorstore.chroma_store import ChromaVectorStore
 from app.vectorstore.embeddings import HashingEmbeddingProvider
+
+# Common words that appear in almost every sentence and cause false overlaps
+# when filtering vector store hits by token intersection.
+_STOPWORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "to", "of", "in", "for",
+    "on", "with", "at", "by", "from", "as", "into", "through", "about",
+    "and", "or", "but", "not", "that", "this", "it", "its", "which",
+    "who", "what", "how", "when", "where", "there", "their", "they",
+    "he", "she", "we", "you", "i", "me", "him", "her", "us", "them",
+    "s", "t", "re", "ve", "ll", "d",
+})
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Return meaningful (non-stopword) tokens of length > 2."""
+    tokens = re.findall(r"[a-z]{3,}", text.lower())
+    return {t for t in tokens if t not in _STOPWORDS}
 
 
 class RetrievalCoordinator:
@@ -42,7 +62,17 @@ class RetrievalCoordinator:
         for query in queries[:3]:
             web_results.extend(await self._search_adapter.search(query, language, limit=3))
 
-        combined = self._deduplicate(fact_checks + vector_hits + web_results)
+        # The vector store persists across all requests. Filter its hits using
+        # *content-word* overlap (stopwords excluded) so that documents from
+        # previous unrelated queries are not included.  Fact-check and web
+        # results are always kept because they are fetched fresh per request.
+        claim_content = _content_tokens(claim)
+        relevant_vector_hits = [
+            h for h in vector_hits
+            if claim_content & _content_tokens(self._document_text(h))
+        ]
+
+        combined = self._deduplicate(fact_checks + relevant_vector_hits + web_results)
         embeddings = await self._embedding_provider.embed_texts(
             [self._document_text(item) for item in combined]
         )
@@ -65,12 +95,14 @@ class RetrievalCoordinator:
 
     @staticmethod
     def _rank(claim: str, items: list[RetrievedSource]) -> list[RetrievedSource]:
-        lowered_claim = claim.lower()
+        claim_content = _content_tokens(claim)
         for item in items:
-            haystack = f"{item.title} {item.snippet} {item.claim_text}".lower()
-            token_overlap = len(set(lowered_claim.split()) & set(haystack.split()))
-            item.similarity_score = min(1.0, token_overlap / max(1, len(set(lowered_claim.split()))))
-            item.agreement = RetrievalCoordinator._infer_agreement(lowered_claim, item)
+            doc_content = _content_tokens(
+                f"{item.title} {item.snippet} {item.claim_text}"
+            )
+            overlap = len(claim_content & doc_content)
+            item.similarity_score = min(1.0, overlap / max(1, len(claim_content)))
+            item.agreement = RetrievalCoordinator._infer_agreement(claim.lower(), item)
         return sorted(
             items,
             key=lambda item: (

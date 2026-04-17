@@ -74,8 +74,10 @@ class DeterministicScoringEngine:
         if not retrieved_sources:
             return 0.0
         supports = sum(1 for item in retrieved_sources if item.agreement == "supports")
+        # "related" means the source discusses the same claim/event — treat it
+        # as 0.7× rather than 0.5× since it is corroborating, not neutral.
         related = sum(1 for item in retrieved_sources if item.agreement == "related")
-        return min(1.0, (supports + 0.5 * related) / len(retrieved_sources))
+        return min(1.0, (supports + 0.7 * related) / len(retrieved_sources))
 
     @staticmethod
     def _contradiction_score(retrieved_sources: list[RetrievedSource]) -> float:
@@ -105,7 +107,10 @@ class DeterministicScoringEngine:
     def _uncertainty_penalty(retrieved_sources: list[RetrievedSource]) -> float:
         if not retrieved_sources:
             return 1.0
-        unknowns = sum(1 for item in retrieved_sources if item.agreement in {"unknown", "related"})
+        # Only penalise sources with NO topical connection to the claim.
+        # "related" sources discuss the same event — penalising them as uncertain
+        # wrongly drags down scores for confirmed news with only web sources.
+        unknowns = sum(1 for item in retrieved_sources if item.agreement == "unknown")
         contradictions = sum(1 for item in retrieved_sources if item.agreement == "contradicts")
         return min(1.0, (0.6 * unknowns + contradictions) / len(retrieved_sources))
 
@@ -122,7 +127,7 @@ class DeterministicScoringEngine:
             return "insufficient_evidence"
         if contradiction_score >= 0.4 or fact_check_match_score <= -0.5:
             return "false" if reliability_score <= 3 else "misleading"
-        if support_score >= 0.55 and reliability_score >= 7:
+        if support_score >= 0.5 and reliability_score >= 7:
             return "true"
         if evidence_count < 2 or reliability_score <= 5:
             return "unverifiable"

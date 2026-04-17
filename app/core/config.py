@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     nim_base_url: str = Field(default="https://integrate.api.nvidia.com/v1")
     nim_api_key: str = Field(default="")
     nim_model: str = Field(default="mistralai/mistral-small-3.1-24b-instruct-2503")
+    nim_fallback_models: str = Field(default="")
     nim_temperature: float = Field(default=0.1)
 
     google_fact_check_api_key: str = Field(default="")
@@ -38,6 +39,24 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    def get_nim_model_candidates(self) -> list[str]:
+        candidates = [self.nim_model]
+        if self.nim_fallback_models:
+            candidates.extend(
+                item.strip()
+                for item in self.nim_fallback_models.split(",")
+                if item.strip()
+            )
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            normalized = candidate.strip()
+            if normalized and normalized not in seen:
+                deduped.append(normalized)
+                seen.add(normalized)
+        return deduped
 
 
 @lru_cache(maxsize=1)

@@ -78,3 +78,5 @@ class AnalyzeHeadlineResponse(BaseModel):
     limitations: list[str]
     uncertainty_flags: list[str]
     evidence_features: EvidenceFeatures
+    actual_news_headline: Optional[str] = None
+    actual_news_description: Optional[str] = None

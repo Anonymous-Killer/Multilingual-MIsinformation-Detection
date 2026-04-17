@@ -78,3 +78,5 @@ async def test_pipeline_returns_structured_response() -> None:
         "unverifiable",
         "insufficient_evidence",
     }
+    assert response.actual_news_headline == "Claim reviewed"
+    assert response.actual_news_description is not None

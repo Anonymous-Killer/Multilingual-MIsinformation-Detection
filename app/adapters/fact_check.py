@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Any, Optional
 
@@ -42,9 +43,10 @@ class GoogleFactCheckAdapter:
             reviews = claim.get("claimReview", [])
             review = reviews[0] if reviews else {}
             published_at = review.get("reviewDate")
+            stable_id = self._build_source_id(claim, review, index)
             normalized.append(
                 RetrievedSource(
-                    source_id=f"google-fact-check-{index}",
+                    source_id=stable_id,
                     source_name=review.get("publisher", {}).get("name", "Google Fact Check"),
                     source_type="fact_check",
                     title=review.get("title") or claim.get("text", "Fact check result"),
@@ -68,3 +70,18 @@ class GoogleFactCheckAdapter:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
+
+    @staticmethod
+    def _build_source_id(
+        claim: dict[str, Any],
+        review: dict[str, Any],
+        index: int,
+    ) -> str:
+        raw_value = (
+            review.get("url")
+            or review.get("title")
+            or claim.get("text")
+            or f"claim-{index}"
+        )
+        digest = hashlib.sha1(raw_value.encode("utf-8")).hexdigest()[:12]
+        return f"google-fact-check-{digest}"

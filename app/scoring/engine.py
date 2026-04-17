@@ -17,15 +17,33 @@ class DeterministicScoringEngine:
         coverage_score = min(1.0, len(retrieved_sources) / 5)
         uncertainty_penalty = self._uncertainty_penalty(retrieved_sources)
 
-        raw_score = (
-            0.35 * fact_check_match_score
-            + 0.2 * support_score
-            + 0.15 * source_credibility_score
-            + 0.1 * recency_score
-            + 0.1 * coverage_score
-            - 0.25 * contradiction_score
-            - 0.15 * uncertainty_penalty
-        )
+        has_fact_checks = any(s.source_type == "fact_check" for s in retrieved_sources)
+        if has_fact_checks:
+            # Fact-check sources are authoritative — give them dominant weight.
+            raw_score = (
+                0.40 * fact_check_match_score
+                + 0.20 * support_score
+                + 0.15 * source_credibility_score
+                + 0.10 * recency_score
+                + 0.10 * coverage_score
+                - 0.25 * contradiction_score
+                - 0.15 * uncertainty_penalty
+            )
+        else:
+            # No fact-checks: support_score is the dominant signal.
+            # Quality metrics (credibility, recency, coverage) describe the
+            # *sources*, not the *claim* — they must not compensate for missing
+            # evidence.  A small baseline deduction keeps unverified headlines
+            # below neutral even when retrieved sources look reputable.
+            raw_score = (
+                0.70 * support_score
+                + 0.10 * source_credibility_score
+                + 0.08 * recency_score
+                + 0.08 * coverage_score
+                - 0.20 * contradiction_score
+                - 0.10 * uncertainty_penalty
+                - 0.05
+            )
         reliability_score = max(1, min(10, round(5 + raw_score * 5)))
         classification = self._classify(
             reliability_score=reliability_score,
@@ -34,6 +52,10 @@ class DeterministicScoringEngine:
             fact_check_match_score=fact_check_match_score,
             evidence_count=len(retrieved_sources),
         )
+        # When fact-checks are present they are the strongest confidence signal;
+        # otherwise lean on support_score so confidence also rises for confirmed
+        # headlines that have no dedicated fact-check entry.
+        confidence_signal = abs(fact_check_match_score) if has_fact_checks else support_score
         confidence = max(
             0.05,
             min(
@@ -41,7 +63,7 @@ class DeterministicScoringEngine:
                 0.25
                 + 0.3 * coverage_score
                 + 0.2 * source_credibility_score
-                + 0.2 * abs(fact_check_match_score)
+                + 0.2 * confidence_signal
                 - 0.25 * uncertainty_penalty,
             ),
         )
@@ -73,11 +95,19 @@ class DeterministicScoringEngine:
     def _support_score(retrieved_sources: list[RetrievedSource]) -> float:
         if not retrieved_sources:
             return 0.0
-        supports = sum(1 for item in retrieved_sources if item.agreement == "supports")
-        # "related" means the source discusses the same claim/event — treat it
-        # as 0.7× rather than 0.5× since it is corroborating, not neutral.
-        related = sum(1 for item in retrieved_sources if item.agreement == "related")
-        return min(1.0, (supports + 0.7 * related) / len(retrieved_sources))
+        total = 0.0
+        for item in retrieved_sources:
+            if item.agreement == "supports":
+                total += 1.0
+            elif item.agreement == "related":
+                # Only credit "related" sources when their content substantially
+                # overlaps the claim (sim ≥ 0.4).  Generic articles that merely
+                # share a keyword (e.g. "China" / "India") have sim ≈ 0.2–0.3
+                # and contribute nothing, preventing topic-adjacent noise from
+                # inflating scores for unverifiable headlines.
+                sim = min(1.0, item.similarity_score or 0.0)
+                total += max(0.0, (sim - 0.4) * 2.5)
+        return min(1.0, total / len(retrieved_sources))
 
     @staticmethod
     def _contradiction_score(retrieved_sources: list[RetrievedSource]) -> float:

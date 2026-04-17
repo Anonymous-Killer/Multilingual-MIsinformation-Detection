@@ -25,9 +25,50 @@ _STOPWORDS = frozenset({
 
 
 def _content_tokens(text: str) -> set[str]:
-    """Return meaningful (non-stopword) tokens of length > 2."""
+    """Return meaningful (non-stopword) tokens of length > 2 (used for fast set-overlap filtering)."""
     tokens = re.findall(r"[a-z]{3,}", text.lower())
     return {t for t in tokens if t not in _STOPWORDS}
+
+
+def _token_weights(text: str) -> dict[str, float]:
+    """Return a token → importance-weight mapping for a piece of text.
+
+    The weight reflects how *specific* (i.e. discriminative) each token is:
+
+    • Numbers (e.g. "900", "200") are maximally specific — a casualty count or
+      year in a headline must appear in a source that actually covers the same
+      event.  Short 1-2 digit numbers ("10", "5") are common and get less
+      weight than larger ones.
+    • Long alphabetic tokens tend to describe specific concepts ("investigation",
+      "parliament") and outweigh short, common ones ("war", "man").
+    • Stopwords are excluded entirely.
+
+    This prevents generic context words (country names, short verbs) from
+    dominating the similarity score when they match unrelated articles that
+    merely mention the same region or topic area.
+    """
+    weights: dict[str, float] = {}
+
+    # Numeric tokens — higher weight for longer/larger numbers
+    for num in re.findall(r"\b\d+\b", text):
+        weights[num] = 1.5 if len(num) <= 2 else 3.0
+
+    # Alphabetic content words weighted by character length as a specificity proxy
+    for token in re.findall(r"[a-z]{3,}", text.lower()):
+        if token in _STOPWORDS:
+            continue
+        n = len(token)
+        if n <= 4:
+            w = 0.6   # short words — often common nouns or country codes
+        elif n <= 6:
+            w = 1.0
+        elif n <= 9:
+            w = 1.4
+        else:
+            w = 1.8   # long words are usually domain-specific
+        weights[token] = w
+
+    return weights
 
 
 class RetrievalCoordinator:
@@ -95,14 +136,24 @@ class RetrievalCoordinator:
 
     @staticmethod
     def _rank(claim: str, items: list[RetrievedSource]) -> list[RetrievedSource]:
-        claim_content = _content_tokens(claim)
+        claim_weights = _token_weights(claim)
+        total_claim_weight = max(1.0, sum(claim_weights.values()))
+
         for item in items:
-            doc_content = _content_tokens(
+            doc_weights = _token_weights(
                 f"{item.title} {item.snippet} {item.claim_text}"
             )
-            overlap = len(claim_content & doc_content)
-            item.similarity_score = min(1.0, overlap / max(1, len(claim_content)))
+            # Weighted overlap: sum the importance of each claim token that
+            # also appears in the document.  A source that only shares geography
+            # keywords ("china", "india") but not the specific event details
+            # ("bombed", "900", "injured") will score much lower than one that
+            # actually covers the same incident.
+            overlap_weight = sum(
+                w for token, w in claim_weights.items() if token in doc_weights
+            )
+            item.similarity_score = min(1.0, overlap_weight / total_claim_weight)
             item.agreement = RetrievalCoordinator._infer_agreement(claim.lower(), item)
+
         return sorted(
             items,
             key=lambda item: (

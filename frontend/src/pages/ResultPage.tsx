@@ -35,7 +35,7 @@ export function ResultPage() {
   const evidencePoints = splitEvidence(result.evidence_summary)
   const showRealNews   =
     (result.actual_news_headline || result.actual_news_description) &&
-    result.confidence < 0.6
+    result.reliability_score <= 6
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-6 md:py-8 animate-slide-up">
@@ -64,6 +64,13 @@ export function ResultPage() {
         <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-blue-400">Normalized Claim</p>
           <p className="text-sm text-gray-700">{result.normalized_claim}</p>
+        </div>
+      )}
+
+      {/* ── Possible real news (score ≤ 6) ── */}
+      {showRealNews && (
+        <div className="mb-3">
+          <ActualNewsCard headline={result.actual_news_headline} description={result.actual_news_description} />
         </div>
       )}
 
@@ -107,13 +114,6 @@ export function ResultPage() {
           <div className="grid grid-cols-2 gap-2">
             {result.retrieved_sources.map((src) => <SourceCard key={src.source_id} source={src} />)}
           </div>
-        </div>
-      )}
-
-      {/* ── Possible real news ── */}
-      {showRealNews && (
-        <div className="mb-3">
-          <ActualNewsCard headline={result.actual_news_headline} description={result.actual_news_description} />
         </div>
       )}
 

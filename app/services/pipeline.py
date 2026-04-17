@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from typing import Optional
 
@@ -18,6 +19,28 @@ from app.services.normalization import ClaimNormalizationService
 
 
 LOGGER = logging.getLogger(__name__)
+
+# Words that carry no factual meaning and must not count toward the
+# "significant word" overlap check used to qualify a retrieved source
+# as genuinely related to the claim.
+_INSIGNIFICANT = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can",
+    "to", "of", "in", "for", "on", "with", "at", "by", "from", "as",
+    "into", "through", "about", "and", "or", "but", "not", "that", "this",
+    "it", "its", "which", "who", "what", "how", "when", "where", "there",
+    "their", "they", "he", "she", "we", "you", "i", "me", "him", "her",
+    "us", "them", "s", "t", "re", "ve", "ll", "d",
+})
+
+
+def _significant_words(text: str) -> set[str]:
+    """Return the content words of *text*, stripping articles and prepositions."""
+    return {
+        t for t in re.findall(r"[a-z]{2,}", text.lower())
+        if t not in _INSIGNIFICANT
+    }
 
 
 class HeadlineAnalysisPipeline:
@@ -94,6 +117,7 @@ class HeadlineAnalysisPipeline:
             actual_news_headline, actual_news_description = self._build_low_score_clarification(
                 retrieved_sources,
                 summary,
+                normalized_claim,
             )
 
         return AnalyzeHeadlineResponse(
@@ -117,35 +141,50 @@ class HeadlineAnalysisPipeline:
         self,
         retrieved_sources: list[RetrievedSource],
         summary: EvidenceSummary,
+        normalized_claim: str,
     ) -> tuple[Optional[str], Optional[str]]:
-        primary_source = self._select_primary_source(retrieved_sources)
-        headline = primary_source.title if primary_source else None
+        primary_source = self._select_primary_source(retrieved_sources, normalized_claim)
 
-        description_candidates = []
         if primary_source:
-            description_candidates.extend(
-                [
-                    primary_source.snippet,
-                    primary_source.claim_text,
-                    f"{primary_source.source_name}: {primary_source.title}",
-                ]
-            )
-        description_candidates.append(summary.evidence_summary)
+            headline = primary_source.title
+            description_candidates: list[Optional[str]] = [
+                primary_source.snippet,
+                primary_source.claim_text,
+                f"{primary_source.source_name}: {primary_source.title}",
+                summary.evidence_summary,
+            ]
+        else:
+            # No retrieved source covers enough of the claim's significant words.
+            # Surface a clear negation so the user knows the claim is unverified
+            # rather than showing a tangentially related article.
+            headline = f"Not verified: {normalized_claim}"
+            description_candidates = [summary.evidence_summary]
 
         description = None
-        for candidate in description_candidates:
+        for candidate in filter(None, description_candidates):
             description = self._normalize_description(candidate)
             if description:
                 break
 
-        return headline, description
+        return headline or None, description
 
     def _select_primary_source(
         self,
         retrieved_sources: list[RetrievedSource],
+        normalized_claim: str,
     ) -> Optional[RetrievedSource]:
+        """Return the best source that covers ≥ 50 % of the claim's significant words.
+
+        Sources that only share incidental words (e.g. a country name) with the
+        claim are rejected so the "Possible Real News" card stays on-topic.
+        Returns *None* when no source clears the threshold.
+        """
         if not retrieved_sources:
             return None
+
+        claim_words = _significant_words(normalized_claim)
+        # Require at least 1 word match; for longer claims require true 50 % coverage.
+        min_required = max(1, math.ceil(len(claim_words) * 0.5))
 
         ranked = sorted(
             retrieved_sources,
@@ -154,7 +193,14 @@ class HeadlineAnalysisPipeline:
                 -(source.similarity_score + source.credibility_weight),
             ),
         )
-        return ranked[0]
+        for source in ranked:
+            source_words = _significant_words(
+                f"{source.title or ''} {source.snippet or ''}"
+            )
+            if len(claim_words & source_words) >= min_required:
+                return source
+
+        return None
 
     def _normalize_description(self, text: str) -> Optional[str]:
         cleaned = " ".join(text.split()).strip()

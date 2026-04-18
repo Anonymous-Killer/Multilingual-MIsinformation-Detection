@@ -12,7 +12,7 @@ export class ApiError extends Error {
 
 // In development the Vite proxy rewrites /api → localhost:8000.
 // In production (Vercel) set VITE_API_BASE_URL to your Render service URL.
-const BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+const BASE = import.meta.env.VITE_API_BASE_URL?.trim() || ''
 
 export async function analyzeHeadline(
   headline: string,

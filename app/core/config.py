@@ -27,6 +27,13 @@ class Settings(BaseSettings):
 
     tavily_api_key: str = Field(default="")
     tavily_base_url: str = Field(default="https://api.tavily.com/search")
+    allowed_origins: str = Field(
+        default=(
+            "http://localhost:5173,"
+            "http://127.0.0.1:5173,"
+            "https://multilingual-misinformation-detection.onrender.com"
+        )
+    )
 
     chroma_path: Path = Field(default=PROJECT_ROOT / "data" / "chroma")
     chroma_collection_name: str = Field(default="misinformation_evidence")
@@ -56,6 +63,17 @@ class Settings(BaseSettings):
             if normalized and normalized not in seen:
                 deduped.append(normalized)
                 seen.add(normalized)
+        return deduped
+
+    def get_allowed_origins(self) -> list[str]:
+        origins = [item.strip() for item in self.allowed_origins.split(",") if item.strip()]
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for origin in origins:
+            if origin not in seen:
+                deduped.append(origin)
+                seen.add(origin)
         return deduped
 
 

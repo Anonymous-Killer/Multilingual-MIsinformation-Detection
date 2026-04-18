@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters.fact_check import GoogleFactCheckAdapter
 from app.adapters.web_search import TavilySearchAdapter
@@ -23,6 +25,23 @@ def create_app() -> FastAPI:
     configure_logging()
     settings = get_settings()
     application = FastAPI(title=settings.app_name)
+
+    # ALLOWED_ORIGINS env var: comma-separated list of frontend URLs.
+    # Defaults to localhost dev origins so local development keeps working.
+    # On Render set it to your Vercel deployment URL, e.g.:
+    #   ALLOWED_ORIGINS=https://your-app.vercel.app
+    raw = os.environ.get(
+        "ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    )
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
+
     application.include_router(router, prefix=settings.api_prefix)
     return application
 

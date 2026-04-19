@@ -18,6 +18,7 @@ class DeterministicScoringEngine:
         uncertainty_penalty = self._uncertainty_penalty(retrieved_sources)
 
         has_fact_checks = any(s.source_type == "fact_check" for s in retrieved_sources)
+        has_claim_level_support = self._has_claim_level_support(retrieved_sources)
         if has_fact_checks:
             # Fact-check sources are authoritative — give them dominant weight.
             raw_score = (
@@ -44,7 +45,9 @@ class DeterministicScoringEngine:
                 - 0.10 * uncertainty_penalty
                 - 0.05
             )
-        reliability_score = max(1, min(10, round(5 + raw_score * 5)))
+        reliability_score = max(0, min(10, round(5 + raw_score * 5)))
+        if not has_fact_checks and not has_claim_level_support:
+            reliability_score = 0 if len(retrieved_sources) >= 3 else 1
         classification = self._classify(
             reliability_score=reliability_score,
             support_score=support_score,
@@ -106,8 +109,18 @@ class DeterministicScoringEngine:
                 # and contribute nothing, preventing topic-adjacent noise from
                 # inflating scores for unverifiable headlines.
                 sim = min(1.0, item.similarity_score or 0.0)
-                total += max(0.0, (sim - 0.4) * 2.5)
+                total += max(0.0, (sim - 0.85) * 2.0)
         return min(1.0, total / len(retrieved_sources))
+
+    @staticmethod
+    def _has_claim_level_support(retrieved_sources: list[RetrievedSource]) -> bool:
+        for item in retrieved_sources:
+            sim = min(1.0, item.similarity_score or 0.0)
+            if item.agreement == "supports":
+                return True
+            if item.agreement == "related" and sim >= 0.9:
+                return True
+        return False
 
     @staticmethod
     def _contradiction_score(retrieved_sources: list[RetrievedSource]) -> float:

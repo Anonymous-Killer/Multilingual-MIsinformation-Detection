@@ -72,7 +72,7 @@ class AnalyzeHeadlineResponse(BaseModel):
     classification: ClassificationLabel
     retrieved_sources: list[RetrievedSource]
     evidence_summary: str
-    reliability_score: int = Field(ge=1, le=10)
+    reliability_score: int = Field(ge=0, le=10)
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning_trace_summary: str
     limitations: list[str]

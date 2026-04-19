@@ -82,3 +82,54 @@ async def test_pipeline_returns_structured_response() -> None:
         "Not verified: Breaking: Viral cure instantly eliminates diabetes"
     )
     assert response.actual_news_description is not None
+
+
+class MixedRetrievalCoordinator:
+    async def retrieve(
+        self,
+        claim: str,
+        language: str,
+        plan: RetrievalPlan,
+        refinement: Optional[QueryRefinement] = None,
+    ) -> list[RetrievedSource]:
+        return [
+            RetrievedSource(
+                source_id="1",
+                source_name="Example Fact Check",
+                source_type="fact_check",
+                title="Viral cure instantly eliminates diabetes",
+                url="https://example.com/fact-check",
+                snippet="A fact-check article says the claim is false.",
+                verdict_label="False",
+                agreement="contradicts",
+                similarity_score=0.95,
+                credibility_weight=0.95,
+            ),
+            RetrievedSource(
+                source_id="2",
+                source_name="Reuters",
+                source_type="web_search",
+                title="Doctors warn viral diabetes cure posts are false",
+                url="https://example.com/news",
+                snippet="Doctors say no instant diabetes cure exists and the viral claim is false.",
+                agreement="related",
+                similarity_score=0.92,
+                credibility_weight=0.9,
+            ),
+        ]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_prefers_non_fact_check_headline_when_available() -> None:
+    pipeline = HeadlineAnalysisPipeline(
+        language_service=LanguageDetectionService(),
+        normalization_service=ClaimNormalizationService(),
+        orchestrator=FakeOrchestrator(),
+        retrieval_coordinator=MixedRetrievalCoordinator(),
+        scoring_engine=DeterministicScoringEngine(),
+    )
+    response = await pipeline.analyze(
+        AnalyzeHeadlineRequest(headline="Breaking: Viral cure instantly eliminates diabetes")
+    )
+    assert response.actual_news_headline == "Doctors warn viral diabetes cure posts are false"
+    assert response.actual_news_description is not None

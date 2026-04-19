@@ -146,13 +146,22 @@ class HeadlineAnalysisPipeline:
         primary_source = self._select_primary_source(retrieved_sources, normalized_claim)
 
         if primary_source:
-            headline = primary_source.title
-            description_candidates: list[Optional[str]] = [
-                primary_source.snippet,
-                primary_source.claim_text,
-                f"{primary_source.source_name}: {primary_source.title}",
-                summary.evidence_summary,
-            ]
+            if primary_source.source_type == "fact_check":
+                headline = self._build_fact_check_headline(primary_source, normalized_claim)
+                description_candidates: list[Optional[str]] = [
+                    primary_source.snippet,
+                    primary_source.claim_text,
+                    summary.evidence_summary,
+                    f"{primary_source.source_name}: {primary_source.title}",
+                ]
+            else:
+                headline = primary_source.title
+                description_candidates = [
+                    primary_source.snippet,
+                    primary_source.claim_text,
+                    f"{primary_source.source_name}: {primary_source.title}",
+                    summary.evidence_summary,
+                ]
         else:
             # No retrieved source covers enough of the claim's significant words.
             # Surface a clear negation so the user knows the claim is unverified
@@ -188,19 +197,40 @@ class HeadlineAnalysisPipeline:
 
         ranked = sorted(
             retrieved_sources,
-            key=lambda source: (
-                source.source_type == "fact_check",
-                -(source.similarity_score + source.credibility_weight),
-            ),
+            key=lambda source: -(source.similarity_score + source.credibility_weight),
         )
+
+        non_fact_check_matches: list[RetrievedSource] = []
+        fact_check_matches: list[RetrievedSource] = []
         for source in ranked:
             source_words = _significant_words(
                 f"{source.title or ''} {source.snippet or ''}"
             )
             if len(claim_words & source_words) >= min_required:
-                return source
+                if source.source_type == "fact_check":
+                    fact_check_matches.append(source)
+                else:
+                    non_fact_check_matches.append(source)
 
+        if non_fact_check_matches:
+            return non_fact_check_matches[0]
+        if fact_check_matches:
+            return fact_check_matches[0]
         return None
+
+    @staticmethod
+    def _build_fact_check_headline(
+        source: RetrievedSource,
+        normalized_claim: str,
+    ) -> str:
+        verdict = (source.verdict_label or "").strip()
+        if verdict:
+            return f"Fact check: {verdict}"
+        if source.agreement == "contradicts":
+            return f"Fact check: Claim disputed"
+        if source.agreement == "supports":
+            return f"Fact check: Claim supported"
+        return f"Fact check: {normalized_claim}"
 
     def _normalize_description(self, text: str) -> Optional[str]:
         cleaned = " ".join(text.split()).strip()

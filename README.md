@@ -116,48 +116,7 @@ The scoring logic has also been tightened to handle edge cases better:
 7. Deterministic logic assigns the final score and classification
 8. The frontend renders the result, sources, confidence, and uncertainty flags
 
-## Local Development
 
-Project root:
-
-`C:\Codes\Projects\Multilingual Misinformation Detection Agent`
-
-### Backend setup
-
-Create a `.env` file in the project root with values such as:
-
-```env
-NIM_BASE_URL=https://integrate.api.nvidia.com/v1
-NIM_API_KEY=your_nvidia_key
-NIM_MODEL=mistralai/mistral-small-3.1-24b-instruct-2503
-NIM_FALLBACK_MODELS=abacusai/dracarys-llama-3.1-70b-instruct,01-ai/yi-large
-
-GOOGLE_FACT_CHECK_API_KEY=your_google_key
-TAVILY_API_KEY=your_tavily_key
-```
-
-Run the backend:
-
-```powershell
-Set-Location "C:\Codes\Projects\Multilingual Misinformation Detection Agent"
-uvicorn app.main:app --reload
-```
-
-Backend docs:
-
-- [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-
-### Frontend setup
-
-Run the frontend:
-
-```powershell
-Set-Location "C:\Codes\Projects\Multilingual Misinformation Detection Agent\frontend"
-npm install
-npm run dev
-```
-
-For local frontend-to-backend calls, the Vite dev server proxies `/api` to `http://localhost:8000`.
 
 ## Deployment Notes
 
@@ -188,14 +147,7 @@ The app is deployed as two Render services:
 }
 ```
 
-## Testing
 
-Run backend tests:
-
-```powershell
-Set-Location "C:\Codes\Projects\Multilingual Misinformation Detection Agent"
-pytest
-```
 
 ## Notes
 

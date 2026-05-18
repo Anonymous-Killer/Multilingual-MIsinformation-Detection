@@ -1,22 +1,35 @@
 # Multilingual Misinformation Detection Agent
 
+## Live Demo
+
+- App: [https://multilingual-misinformation-detection.onrender.com/](https://multilingual-misinformation-detection.onrender.com/)
+- Repository: [https://github.com/Anonymous-Killer/Multilingual-MIsinformation-Detection](https://github.com/Anonymous-Killer/Multilingual-MIsinformation-Detection)
+
 ## Overview
 
-This project is a Python-only backend that analyzes a news headline and estimates how reliable it is on a `1-10` scale.
+This project is a full-stack misinformation analysis application that takes a news headline, investigates it with retrieved evidence, and returns a structured reliability assessment.
 
-It is built as an evidence-first misinformation analysis system:
-- input is a single headline string
+The system is designed to be evidence-first:
+- the input is a single headline string
 - the backend detects the language
 - the headline is normalized into a claim
 - fact-check and web evidence are retrieved
-- NVIDIA NIM is used for planning, query refinement, and evidence summarization
-- deterministic backend logic produces the final score and classification
+- an NVIDIA NIM orchestrator helps plan retrieval and summarize evidence
+- deterministic scoring logic produces the final reliability score
 
-The LLM does not decide truth on its own. It only helps orchestrate retrieval and summarize grounded evidence.
+The LLM is not allowed to decide truth on intuition alone. It is restricted to planning, retrieval coordination, and grounded summarization.
 
-## What The Backend Returns
+## What The App Does
 
-For each headline, the API returns structured JSON with:
+Given a headline, the app:
+1. detects its language
+2. normalizes it into a cleaner claim
+3. retrieves fact-check and web evidence
+4. ranks and deduplicates sources
+5. summarizes the evidence
+6. returns a reliability score and classification
+
+The API returns structured JSON including:
 - `input_headline`
 - `detected_language`
 - `normalized_claim`
@@ -28,31 +41,47 @@ For each headline, the API returns structured JSON with:
 - `reasoning_trace_summary`
 - `limitations`
 - `uncertainty_flags`
-
-For lower-confidence or questionable reports, the response can also include:
 - `actual_news_headline`
 - `actual_news_description`
 
-## Core Stack
+## Current Product State
+
+The project is now deployed as a working full-stack app:
+- FastAPI backend on Render
+- React + Vite frontend on Render
+- frontend calls the deployed backend through `VITE_API_BASE_URL`
+- backend includes CORS configuration for the deployed frontend
+
+The scoring logic has also been tightened to handle edge cases better:
+- absurd unsupported headlines can now fall to `0/10`
+- broad entity overlap alone should not keep unsupported claims near neutral
+- low-score explanatory cards now prefer non-fact-check event coverage over fact-check titles when possible
+
+## Tech Stack
+
+### Backend
 
 - Python
 - FastAPI
-- NVIDIA NIM for orchestration
+- httpx
+- Pydantic
+- NVIDIA NIM
 - Google Fact Check Tools API
-- Tavily for web evidence search
-- Chroma as the local vector store
+- Tavily
+- Chroma
 
-## High-Level Flow
+### Frontend
 
-1. Client sends a headline to `POST /api/v1/analyze-headline`
-2. Backend detects language and normalizes the claim
-3. NIM generates a retrieval plan
-4. Evidence is retrieved from fact-check and web sources
-5. Results are deduplicated, ranked, and stored in the vector layer
-6. NIM summarizes the evidence
-7. Deterministic scoring logic assigns the final reliability score and class
+- React
+- Vite
+- TypeScript
+- React Router
+- Tailwind CSS
+- Lucide React
 
-## Project Structure
+## Architecture
+
+### Backend modules
 
 - `app/api/` FastAPI routes
 - `app/core/` configuration and logging
@@ -65,15 +94,37 @@ For lower-confidence or questionable reports, the response can also include:
 - `app/vectorstore/` embeddings and Chroma integration
 - `tests/` backend tests
 
-## Required Project Path
+### Frontend modules
 
-This project is expected to live at:
+- `frontend/src/api/` API client
+- `frontend/src/components/` UI components
+- `frontend/src/hooks/` frontend hooks
+- `frontend/src/pages/` route-level pages
+- `frontend/src/types/` frontend response types
+
+## High-Level Flow
+
+1. The frontend sends a headline to `POST /api/v1/analyze-headline`
+2. The backend detects language and normalizes the claim
+3. NVIDIA NIM generates a retrieval plan
+4. Evidence is pulled from:
+   - Google Fact Check Tools API
+   - Tavily web search
+   - the local Chroma-backed vector layer
+5. Results are deduplicated and ranked
+6. NIM summarizes the evidence
+7. Deterministic logic assigns the final score and classification
+8. The frontend renders the result, sources, confidence, and uncertainty flags
+
+## Local Development
+
+Project root:
 
 `C:\Codes\Projects\Multilingual Misinformation Detection Agent`
 
-## Environment Variables
+### Backend setup
 
-Create a `.env` file in the project root and set:
+Create a `.env` file in the project root with values such as:
 
 ```env
 NIM_BASE_URL=https://integrate.api.nvidia.com/v1
@@ -85,16 +136,49 @@ GOOGLE_FACT_CHECK_API_KEY=your_google_key
 TAVILY_API_KEY=your_tavily_key
 ```
 
-## Run Locally
+Run the backend:
 
 ```powershell
 Set-Location "C:\Codes\Projects\Multilingual Misinformation Detection Agent"
 uvicorn app.main:app --reload
 ```
 
-Open:
+Backend docs:
 
 - [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+
+### Frontend setup
+
+Run the frontend:
+
+```powershell
+Set-Location "C:\Codes\Projects\Multilingual Misinformation Detection Agent\frontend"
+npm install
+npm run dev
+```
+
+For local frontend-to-backend calls, the Vite dev server proxies `/api` to `http://localhost:8000`.
+
+## Deployment Notes
+
+### Render deployment split
+
+The app is deployed as two Render services:
+- backend: Render Web Service
+- frontend: Render Static Site
+
+### Backend deployment considerations
+
+- backend uses `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Python version is pinned in Render for dependency compatibility
+- CORS must allow the deployed frontend origin
+
+### Frontend deployment considerations
+
+- frontend root directory on Render is `frontend`
+- build command is `npm run build`
+- publish directory is `dist`
+- `VITE_API_BASE_URL` points to the backend Render service
 
 ## Example Request
 
@@ -104,18 +188,19 @@ Open:
 }
 ```
 
-## Current Status
+## Testing
 
-- Backend MVP implemented
-- Tests passing
-- Primary model configured through NVIDIA NIM
-- Automatic fallback to alternate NIM models supported
-- Google Fact Check and Tavily integrated
-- Local vector persistence enabled through Chroma
+Run backend tests:
+
+```powershell
+Set-Location "C:\Codes\Projects\Multilingual Misinformation Detection Agent"
+pytest
+```
 
 ## Notes
 
 - Input is a headline string, not a news article URL
 - Fact-check retrieval is prioritized over generic web search
-- Scoring is deterministic and evidence-based
-- Snopes and PolitiFact are planned as future adapters
+- Scores are deterministic and evidence-based
+- The vector layer currently uses local persistence
+- Snopes and PolitiFact are still future adapter candidates rather than active integrations
